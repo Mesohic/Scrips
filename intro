@@ -1,0 +1,177 @@
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait()
+    LocalPlayer = Players.LocalPlayer
+end
+
+local function resolveGuiParent()
+    local success, result
+    for _, getFunc in ipairs({gethui, get_hidden_gui, gethiddengui}) do
+        if getFunc then
+            success, result = pcall(getFunc)
+            if success and result then return result end
+        end
+    end
+    local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+    if playerGui then return playerGui end
+    return game:GetService("CoreGui")
+end
+
+local LoadingPanel = {}
+LoadingPanel.__index = LoadingPanel
+
+local DEFAULTS = {
+    title = "Caddel Loader",
+    messages = {"Initializing...", "Connecting to server...", "Verifying assets...", "Almost there..."},
+    color = Color3.fromRGB(64, 145, 255),
+    duration = 5,
+    font = Enum.Font.GothamSemibold,
+    fontSecondary = Enum.Font.Gotham
+}
+
+function LoadingPanel.new(opts)
+    local self = setmetatable({}, LoadingPanel)
+    self.config = table.clone(DEFAULTS)
+    if type(opts) == "table" then
+        for key, value in pairs(opts) do
+            self.config[key] = value
+        end
+    end
+    self.gui = nil
+    self.threads = {}
+    self.isAlive = false
+    return self
+end
+
+function LoadingPanel:Start()
+    if self.isAlive then return end
+    self.isAlive = true
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "Caddel_LoadingPanel"
+    gui.IgnoreGuiInset = true
+    gui.ResetOnSpawn = false
+
+    local background = Instance.new("Frame", gui)
+    background.Size = UDim2.fromScale(1, 1)
+    background.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    background.BackgroundTransparency = 1
+
+    local container = Instance.new("Frame", background)
+    container.AnchorPoint = Vector2.new(0.5, 0.5)
+    container.Position = UDim2.fromScale(0.5, 0.5)
+    container.Size = UDim2.fromOffset(360, 160)
+    container.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    container.BackgroundTransparency = 1
+    Instance.new("UICorner", container).CornerRadius = UDim.new(0, 14)
+    Instance.new("UIStroke", container).Color = Color3.fromRGB(90, 90, 90)
+
+    local title = Instance.new("TextLabel", container)
+    title.Position = UDim2.fromScale(0.5, 0.15)
+    title.Size = UDim2.fromScale(0.9, 0.25)
+    title.AnchorPoint = Vector2.new(0.5, 0)
+    title.BackgroundTransparency = 1
+    title.Font = self.config.font
+    title.Text = self.config.title
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.TextScaled = true
+
+    local subtitle = Instance.new("TextLabel", container)
+    subtitle.Position = UDim2.fromScale(0.5, 0.45)
+    subtitle.Size = UDim2.fromScale(0.9, 0.15)
+    subtitle.AnchorPoint = Vector2.new(0.5, 0)
+    subtitle.BackgroundTransparency = 1
+    subtitle.Font = self.config.fontSecondary
+    subtitle.Text = self.config.messages[1] or ""
+    subtitle.TextColor3 = Color3.fromRGB(180, 180, 180)
+    subtitle.TextScaled = true
+
+    local barBack = Instance.new("Frame", container)
+    barBack.Position = UDim2.fromScale(0.5, 0.88)
+    barBack.Size = UDim2.fromScale(0.85, 0.12)
+    barBack.AnchorPoint = Vector2.new(0.5, 1)
+    barBack.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+    Instance.new("UICorner", barBack).CornerRadius = UDim.new(0, 10)
+
+    local barFill = Instance.new("Frame", barBack)
+    barFill.Size = UDim2.fromScale(0, 1)
+    barFill.BackgroundColor3 = self.config.color
+    Instance.new("UICorner", barFill).CornerRadius = UDim.new(0, 10)
+
+    self.gui = gui
+    gui.Parent = resolveGuiParent()
+
+    local introTweenInfo = TweenInfo.new(0.6, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out)
+
+    TweenService:Create(background, TweenInfo.new(0.4), {BackgroundTransparency = 0}):Play()
+    container.Size = UDim2.fromOffset(360, 120)
+    TweenService:Create(container, introTweenInfo, {
+        Size = UDim2.fromOffset(360, 160),
+        BackgroundTransparency = 0
+    }):Play()
+
+    TweenService:Create(barFill, TweenInfo.new(self.config.duration, Enum.EasingStyle.Linear), {Size = UDim2.fromScale(1, 1)}):Play()
+
+    local textUpdateThread = task.spawn(function()
+        local messageIndex = 1
+        local lastSwitchTime = tick()
+        while self.isAlive do
+            local percentage = math.floor(barFill.Size.X.Scale * 100)
+            subtitle.Text = string.format("%s %d%%", self.config.messages[messageIndex], percentage)
+            if tick() - lastSwitchTime > 1.5 then
+                lastSwitchTime = tick()
+                messageIndex = (messageIndex % #self.config.messages) + 1
+            end
+            task.wait(0.05)
+        end
+    end)
+    table.insert(self.threads, textUpdateThread)
+
+    task.delay(self.config.duration, function()
+        self:Destroy()
+    end)
+end
+
+function LoadingPanel:Destroy()
+    if not self.isAlive then return end
+    self.isAlive = false
+
+    for _, thread in ipairs(self.threads) do
+        task.cancel(thread)
+    end
+    self.threads = {}
+
+    local fadeInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    if self.gui then
+        for _, child in ipairs(self.gui:GetDescendants()) do
+            if child:IsA("GuiObject") then
+                local prop = "BackgroundTransparency"
+                if child:IsA("TextLabel") or child:IsA("TextButton") then
+                    prop = "TextTransparency"
+                elseif child:IsA("UIStroke") then
+                    prop = "Transparency"
+                end
+                TweenService:Create(child, fadeInfo, {[prop] = 1}):Play()
+            elseif child:IsA("UIStroke") then
+                TweenService:Create(child, fadeInfo, {Transparency = 1}):Play()
+            end
+        end
+        task.wait(0.6)
+        self.gui:Destroy()
+        self.gui = nil
+    end
+end
+
+local panel = LoadingPanel.new({
+    title = "Caddel V3",
+    messages = {"Loading assets...", "Finalizing setup...", "Welcome back!"},
+    color = Color3.fromRGB(85, 170, 255),
+    duration = 10
+})
+
+panel:Start()
