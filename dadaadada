@@ -1,0 +1,32 @@
+local player = game.Players.LocalPlayer
+local folder = workspace:WaitForChild("SpawnedCash")
+
+local character
+local hrp
+
+local function updateCharacter()
+	character = player.Character or player.CharacterAdded:Wait()
+	hrp = character:WaitForChild("HumanoidRootPart")
+end
+
+updateCharacter()
+player.CharacterAdded:Connect(function()
+	task.wait(0.2)
+	updateCharacter()
+end)
+
+while task.wait(0.05) do  -- faster loop
+	if not hrp then continue end
+
+	-- loop through all money models
+	for _, money in ipairs(folder:GetChildren()) do
+		if money:IsA("Model") then
+			local hitbox = money:FindFirstChild("MoneyHitbox")
+			if hitbox then
+				-- fire touch immediately, no wait
+				firetouchinterest(hrp, hitbox, 0)
+				firetouchinterest(hrp, hitbox, 1)
+			end
+		end
+	end
+end
